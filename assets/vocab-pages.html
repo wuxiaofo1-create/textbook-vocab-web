@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>主题单词卡片</title>
+  <style>
+    :root{color-scheme:light;--paper:#fffaf0;--ink:#443c32;--line:#ded4bd;--accent:#b78538}
+    *{box-sizing:border-box}
+    body{margin:0;background:#eee8da;color:var(--ink);font-family:"Segoe UI","Microsoft YaHei",sans-serif}
+    .book{max-width:760px;margin:12px auto;padding:18px 28px 12px;background:var(--paper);border:1px solid var(--line);border-radius:18px;box-shadow:0 8px 28px #5948320d}
+    header{border-bottom:1px dashed var(--line);padding-bottom:10px}
+    h1{margin:0 0 6px;font-size:25px;line-height:1.3}
+    #book-subtitle{margin:0;color:#7b705d;font-size:14px;line-height:1.6}
+    #pages{padding:12px 0}
+    [hidden]{display:none!important}
+    .word-card{text-align:center}
+    .card-topic{margin:0;font-size:18px;line-height:1.4;color:#8a672f}
+    .card-face{min-height:calc(min(340px,39vh) + 132px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:8px 0}
+    .question-hint{margin:0;color:#857663;font-size:14px;line-height:1.4}
+    .atlas-art{display:block;width:min(340px,39vh);max-width:100%;aspect-ratio:var(--atlas-aspect,1);margin:0 auto;border-radius:12px;background-image:var(--atlas-image);background-size:calc(var(--atlas-cols,2)*100%) calc(var(--atlas-rows,2)*100%);background-position:var(--atlas-x,0%) var(--atlas-y,0%);background-repeat:no-repeat}
+    .word{display:inline-flex;align-items:center;justify-content:center;gap:12px;max-width:100%;padding:6px 12px;border:0;border-radius:10px;background:transparent;color:inherit;font:inherit;cursor:pointer;overflow-wrap:anywhere}
+    .word:hover{background:#f5e5bf}
+    button:focus-visible{outline:3px solid #b78538;outline-offset:4px}
+    .english{font-size:40px;line-height:1.25}
+    .chinese{margin:0;font-size:24px;line-height:1.45;overflow-wrap:anywhere}
+    .speak-label{font-size:13px;color:#8a672f;white-space:nowrap}
+    .choice-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;width:min(450px,100%)}
+    .choice{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px;border:2px solid var(--line);border-radius:12px;background:var(--paper);color:inherit;font:inherit;cursor:pointer}
+    .choice:hover{border-color:#bca277}
+    .choice.selected{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent);background:#f8ebcf}
+    .choice .atlas-art{width:min(200px,19vh);border-radius:8px}
+    .choice-label{font-size:13px;line-height:1.3}
+    .choice-status,.answer-feedback{margin:0;font-size:14px;line-height:1.4;color:#7b705d}
+    footer{border-top:1px dashed var(--line);padding-top:12px}
+    .pager{display:flex;align-items:center;justify-content:center;gap:18px}
+    .pager button{border:1px solid #c9b693;background:#f5e5bf;color:var(--ink);padding:10px 20px;border-radius:24px;font:inherit;cursor:pointer}
+    .pager button:disabled{opacity:.4;cursor:default}
+    #next{min-width:150px}
+    #page-indicator{min-width:110px;text-align:center;font-size:14px;font-variant-numeric:tabular-nums}
+    #speech-status{min-height:20px;margin:10px 0 0;text-align:center;color:#7b705d;font-size:13px;line-height:1.5}
+    @media(max-width:800px){.book{margin:10px;padding:16px 22px}}
+    @media(max-width:560px){.book{margin:8px;padding:14px}h1{font-size:23px}.pager{gap:8px}.pager button{padding:9px 12px;font-size:14px}#next{min-width:125px}#page-indicator{min-width:92px;font-size:12px}.english{font-size:32px}}
+  </style>
+  <style id="atlas-resources"></style>
+</head>
+<body>
+  <div class="book">
+    <header>
+      <h1 id="book-title">主题单词卡片</h1>
+      <p id="book-subtitle">看英文、听发音，选图后翻页核对</p>
+    </header>
+    <main id="pages">
+      <!-- CONTENT_START -->
+      <!-- 每词一个word-card；题面英文朗读和筛选后的图片候选；答案显示正确插画及中文。不能保证唯一答案时保留回想翻页卡。 -->
+      <!-- CONTENT_END -->
+    </main>
+    <footer>
+      <nav class="pager" aria-label="单词卡片翻页">
+        <button id="previous" type="button" disabled>上一页</button>
+        <span id="page-indicator" aria-live="polite">尚未填入词汇</span>
+        <button id="next" type="button" disabled>翻页看答案</button>
+      </nav>
+      <p id="speech-status" role="status" aria-live="polite">先回想，再翻页看答案</p>
+      <noscript>当前浏览器未启用JavaScript，翻页和朗读需要启用JavaScript。</noscript>
+    </footer>
+  </div>
+  <script>
+    (() => {
+      'use strict';
+      const cards = Array.from(document.querySelectorAll('.word-card'));
+      const previous = document.getElementById('previous');
+      const next = document.getElementById('next');
+      const indicator = document.getElementById('page-indicator');
+      const status = document.getElementById('speech-status');
+      const synth = window.speechSynthesis;
+      const canSpeak = !!synth && typeof synth.speak === 'function' && typeof window.SpeechSynthesisUtterance === 'function';
+      let step = 0;
+      let speechId = 0;
+      let currentUtterance = null;
+      const choiceStates = new WeakMap();
+
+      function shuffle(items) {
+        const result = items.slice();
+        for (let i = result.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [result[i], result[j]] = [result[j], result[i]];
+        }
+        return result;
+      }
+
+      cards.forEach(card => {
+        const grid = card.querySelector('.choice-grid');
+        if (!grid) { return; }
+        const answer = card.getAttribute('data-answer');
+        const all = Array.from(grid.querySelectorAll('button.choice[data-choice]'));
+        const correct = all.find(option => option.getAttribute('data-choice') === answer);
+        const wrong = all.filter(option => option !== correct);
+        if (!correct || wrong.length < 3) { grid.hidden = true; return; }
+        const options = shuffle([correct, ...shuffle(wrong).slice(0, 3)]);
+        all.forEach(option => { option.hidden = true; });
+        options.forEach((option, i) => {
+          option.hidden = false;
+          option.querySelector('.choice-label').textContent = 'ABCD'[i];
+          option.setAttribute('aria-label', '选择图片 ' + 'ABCD'[i]);
+          grid.appendChild(option);
+        });
+        choiceStates.set(card, {answer, options, selected: null});
+      });
+
+      function updateChoiceFeedback(card) {
+        const state = choiceStates.get(card);
+        if (!state) { return; }
+        const label = option => 'ABCD'[state.options.indexOf(option)];
+        const correct = state.options.find(option => option.getAttribute('data-choice') === state.answer);
+        card.querySelector('.choice-status').textContent = state.selected ? '已选图片 ' + label(state.selected) + '，翻页核对' : '请选择一张图片，再翻页核对';
+        state.options.forEach(option => {
+          const selected = option === state.selected;
+          option.classList.toggle('selected', selected);
+          option.setAttribute('aria-pressed', String(selected));
+        });
+        const feedback = card.querySelector('.answer-feedback');
+        feedback.hidden = false;
+        feedback.textContent = !state.selected ? '正确图片：' + label(correct) : (state.selected === correct ? '选对了！正确图片是 ' + label(correct) : '你选了 ' + label(state.selected) + '，正确图片是 ' + label(correct));
+      }
+
+      function hint() {
+        const card = cards[Math.floor(step / 2)];
+        const face = card && card.querySelector(step % 2 === 0 ? '.question-face' : '.answer-face');
+        if (face && face.querySelector('button.word[data-say]')) {
+          return canSpeak ? '点击英文可朗读' : '当前浏览器无法朗读，仍可翻页背单词';
+        }
+        return step % 2 === 0 ? '先想一想，再翻页看答案' : '看完答案，再进入下一个单词';
+      }
+
+      function stopSpeech() {
+        speechId += 1;
+        if (synth && typeof synth.cancel === 'function') { try { synth.cancel(); } catch (_) {} }
+        currentUtterance = null;
+        status.textContent = hint();
+      }
+
+      function showStep(index) {
+        stopSpeech();
+        if (!cards.length) {
+          indicator.textContent = '尚未填入词汇';
+          previous.disabled = true;
+          next.disabled = true;
+          return;
+        }
+        step = Math.max(0, Math.min(index, cards.length * 2 - 1));
+        const current = Math.floor(step / 2);
+        const revealed = step % 2 === 1;
+        cards.forEach((card, i) => {
+          card.hidden = i !== current;
+          card.querySelector('.question-face').hidden = revealed;
+          card.querySelector('.answer-face').hidden = !revealed;
+        });
+        indicator.textContent = (current + 1) + ' / ' + cards.length + ' · ' + (revealed ? '答案' : '题面');
+        previous.disabled = step === 0;
+        next.disabled = step === cards.length * 2 - 1;
+        next.textContent = !revealed ? '翻页看答案' : (next.disabled ? '已到最后' : '下一个单词');
+        updateChoiceFeedback(cards[current]);
+        status.textContent = hint();
+      }
+
+      function speak(text) {
+        if (!canSpeak) { status.textContent = hint(); return; }
+        stopSpeech();
+        const id = speechId;
+        try {
+          const utterance = new window.SpeechSynthesisUtterance(text);
+          currentUtterance = utterance;
+          utterance.lang = 'en-US';
+          utterance.rate = 0.85;
+          const voices = typeof synth.getVoices === 'function' ? synth.getVoices() : [];
+          const voice = voices.find(v => /^en[-_]US$/i.test(v.lang)) || voices.find(v => /^en(?:[-_]|$)/i.test(v.lang));
+          if (voice) { utterance.voice = voice; }
+          status.textContent = '准备朗读：' + text;
+          utterance.onstart = () => { if (id === speechId) { status.textContent = '正在朗读：' + text; } };
+          utterance.onend = () => { if (id === speechId) { currentUtterance = null; status.textContent = hint(); } };
+          utterance.onerror = () => {
+            if (id === speechId) {
+              currentUtterance = null;
+              status.textContent = '朗读暂时不可用，请检查电脑英文语音或换浏览器再试';
+            }
+          };
+          synth.speak(utterance);
+        } catch (_) {
+          currentUtterance = null;
+          status.textContent = '朗读暂时不可用，请检查电脑英文语音或换浏览器再试';
+        }
+      }
+
+      previous.addEventListener('click', () => showStep(step - 1));
+      next.addEventListener('click', () => showStep(step + 1));
+      document.addEventListener('keydown', event => {
+        if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) { return; }
+        if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+          event.preventDefault();
+          showStep(step + (event.key === 'ArrowRight' ? 1 : -1));
+        }
+      });
+      document.getElementById('pages').addEventListener('click', event => {
+        const current = cards[Math.floor(step / 2)];
+        const option = event.target.closest('button.choice[data-choice]');
+        const state = current && choiceStates.get(current);
+        if (option && current && state && !current.hidden && !option.closest('[hidden]') && state.options.includes(option)) {
+          state.selected = option;
+          updateChoiceFeedback(current);
+          return;
+        }
+        const word = event.target.closest('button.word[data-say]');
+        if (word && current && current.contains(word) && !current.hidden && !word.closest('[hidden]')) {
+          const text = word.getAttribute('data-say').trim();
+          if (text) { speak(text); }
+        }
+      });
+      window.addEventListener('pagehide', stopSpeech);
+      showStep(0);
+    })();
+  </script>
+</body>
+</html>
